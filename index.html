@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f5f2eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="LeLuma">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="description" content="A little light. A lot of you. 75 photo filters, live camera, and private, offline editing.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <title>LeLuma · Your light, your look</title>
+</head>
+<body>
+<svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+  <symbol id="i-flip" viewBox="0 0 24 24"><path d="M4 9a8 8 0 0 1 14-4l2 2M20 3v4h-4M20 15a8 8 0 0 1-14 4l-2-2M4 21v-4h4"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="14" r="8"/><path d="M12 10v4l2 2M9 2h6M12 2v4M18 6l2-2"/></symbol>
+  <symbol id="i-compare" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M15 7v10M18 9v6"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.2"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9Z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M8 6 9 3h6l1 3h4a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3M4 4l2 2M18 18l2 2M4 20l2-2M18 6l2-2"/></symbol>
+</defs></svg>
+<main id="app">
+  <div id="startupNotice" class="startup-notice">Loading LeLuma… If this stays here, <a href="./repair.html">repair the app</a>. Use your HTTPS GitHub Pages link in Safari.</div>
+  <header class="header">
+    <a class="brand" href="./" aria-label="LeLuma home"><svg><use href="#i-sun"/></svg>LeLuma<span>PHOTO STUDIO</span></a>
+    <button class="icon-button" id="helpButton" aria-label="Help and settings"><svg><use href="#i-info"/></svg></button>
+  </header>
+  <section class="viewfinder" id="viewfinder" aria-label="Camera preview">
+    <div id="cameraSurface" class="camera-surface"><video id="video" autoplay muted playsinline webkit-playsinline disablepictureinpicture aria-label="Live camera"></video></div>
+    <canvas id="preview" aria-label="Filtered photo preview" hidden></canvas>
+    <div class="frame-top"><span class="pill" id="sourceBadge">YOUR LIGHT, YOUR LOOK</span><span class="pill" id="resolutionBadge" hidden></span></div>
+    <div id="grid" class="grid" hidden></div>
+    <div class="welcome" id="welcome">
+      <div class="welcome-copy"><span class="eyebrow">A POCKETFUL OF POSSIBILITY</span><h1>A little light.<br>A lot of you.</h1><p>75 looks. Endless ways to feel like yourself.</p></div>
+      <div class="welcome-actions"><button class="primary" id="startButton"><svg><use href="#i-camera"/></svg>Open camera</button><button class="text-button" id="cancelCameraButton" hidden>Cancel camera opening</button><button class="text-button" id="demoButton">Explore the looks <span>↗</span></button><span class="privacy-note">On your phone. Always private.</span></div>
+    </div>
+    <div id="resumePanel" class="resume-panel" hidden><p>Camera paused</p><button class="primary" id="resumeButton">Resume camera</button><button id="cancelResumeButton" class="text-button" hidden>Cancel camera opening</button></div>
+    <div id="countdown" class="countdown" hidden aria-live="assertive"></div>
+    <div class="frame-bottom" id="frameBottom" hidden><span id="frameFilterName">Original</span><span id="frameHint">Live preview</span></div>
+    <div class="flash" id="flash"></div>
+    <div id="previewError" class="preview-error" hidden><p id="previewErrorText">Preview interrupted.</p><button id="retryPreview" class="primary">Retry preview</button></div>
+  </section>
+  <div id="mediaNotice" class="media-notice" role="status" hidden><span id="mediaNoticeText">Starting video…</span><button id="playCamera" class="secondary">Resume video</button></div>
+  <div id="liveControls" class="live-controls" hidden><button id="previewMode" aria-pressed="false">Show camera only</button><button id="restartCamera">Restart camera</button></div>
+  <div class="framing-controls" role="group" aria-label="Photo framing"><button id="frame-original" aria-pressed="true">Full frame</button><button id="frame-portrait" aria-pressed="false">Portrait <small>3:4</small></button><button id="frame-landscape" aria-pressed="false">Landscape <small>4:3</small></button></div>
+  <p id="framingLabel" class="framing-label">Full frame · no crop</p>
+  <div class="tools" aria-label="Camera tools">
+    <button id="flipButton" class="tool" aria-label="Switch front and back camera"><svg><use href="#i-flip"/></svg><span>Flip</span></button>
+    <button id="gridButton" class="tool" aria-pressed="false"><svg><use href="#i-grid"/></svg><span>Grid</span></button>
+    <button id="timerButton" class="tool" aria-label="Timer: off"><svg><use href="#i-timer"/></svg><span id="timerLabel">Timer</span></button>
+    <button id="compareButton" class="tool" aria-pressed="false"><svg><use href="#i-compare"/></svg><span>Original</span></button>
+  </div>
+  <section class="studio" aria-label="Photo editor">
+    <div class="studio-heading"><div class="tabs" role="tablist" aria-label="Editing tools"><button id="looksTab" role="tab" aria-selected="true" aria-controls="looksPanel">Looks <span>75</span></button><button id="adjustTab" role="tab" aria-selected="false" aria-controls="adjustPanel">Adjust</button></div><button id="favoriteButton" class="icon-button" aria-label="Favorite current filter" aria-pressed="false"><svg><use href="#i-star"/></svg></button></div>
+    <div id="looksPanel" role="tabpanel" aria-labelledby="looksTab">
+      <div id="categories" class="categories" aria-label="Filter categories"></div>
+      <div id="filterRail" class="filter-rail" aria-label="Choose a filter"></div>
+      <div class="strength"><label for="strength">Intensity</label><input id="strength" type="range" min="0" max="100" value="100"><output id="strengthValue" for="strength">100</output></div>
+    </div>
+    <div id="adjustPanel" role="tabpanel" aria-labelledby="adjustTab" hidden><div class="adjust-heading"><span>Fine-tune your light</span><button id="resetAdjust" class="text-button">Reset</button></div><div id="adjustments" class="adjustments"></div></div>
+    <p class="look-description" id="lookDescription">Your image, untouched.</p>
+  </section>
+  <footer class="capture-area">
+    <div id="captureMode" class="capture-mode" role="group" aria-label="Photo capture mode"><button id="liveMode" aria-pressed="false">Live shot</button><button id="fullMode" aria-pressed="true">Full photo <span>HQ</span></button></div>
+    <div id="cameraActions" class="capture-actions"><button class="side-action" id="importButton"><svg><use href="#i-image"/></svg><span>Import</span></button><button id="shutterButton" class="shutter" aria-label="Take full-resolution photo"><span></span></button><button class="side-action" id="qualityButton"><span class="hq-mark">HQ</span><span>Quality</span></button></div>
+    <div id="reviewActions" class="review-actions" hidden><button class="secondary" id="retakeButton">New photo</button><button class="primary" id="saveButton"><svg><use href="#i-download"/></svg>Save photo</button></div>
+    <p class="capture-note" id="captureNote">iPhone camera → your chosen look, at source size</p>
+    <div class="status-line"><span id="offlineStatus"><i></i>Setting up offline…</span><span>MADE FOR YOUR MOMENTS</span></div>
+  </footer>
+</main>
+<aside id="portraitGuard" class="portrait-guard" aria-label="Portrait orientation required"><svg><use href="#i-camera"/></svg><h2>Stay in your frame.</h2><p>LeLuma is made for portrait.<br>Turn your phone upright.</p><small>For no rotation, turn on Portrait Orientation Lock in iPhone Control Center.</small></aside>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="helpDialog" class="sheet">
+  <div class="sheet-heading"><div><span class="eyebrow">A FEW GOOD THINGS TO KNOW</span><h2>Your pocket studio.</h2></div><button class="icon-button" data-close="helpDialog" aria-label="Close help"><svg><use href="#i-close"/></svg></button></div>
+  <div class="sheet-content">
+    <h3>Choose your capture</h3><p><strong>Full photo</strong> opens the iPhone camera, then applies your look to the returned photo. This is the default for better source quality. Live filters are visible in LeLuma, not inside the iPhone camera sheet.</p><p><strong>Live shot</strong> captures exactly when you tap. On iPhone, its resolution is usually limited to the live video feed; the actual pixel size appears above the preview.</p>
+    <h3>Portrait or landscape</h3><p>Choose <strong>Portrait 3:4</strong> or <strong>Landscape 4:3</strong> to frame your photo. The preview and saved picture use the same center crop. You can change framing after capture. <strong>Full frame</strong> keeps the whole image. The app’s controls stay upright; landscape framing does not require rotating your phone.</p>
+    <h3>Every pixel, thoughtfully kept</h3><p>Full frame exports retain the input dimensions. Portrait and Landscape crop the edges and keep the remaining source pixels without upscaling. PNG avoids extra lossy compression; JPEG at maximum quality makes smaller files. Filtered copies are standard color images, not RAW, HDR, Live Photos, or the original metadata. Keep your original for archival quality.</p>
+    <h3>Looks that actually preview</h3><p>Tap a look to apply it at <strong>100% intensity</strong>, then adjust the slider. The <strong>Original</strong> toolbar button toggles before/after. A look’s name appears over the image; <strong>Look applied</strong> means its pixels have finished updating. Skin looks soften skin-like colors. Definition looks use local contrast and sharpening for features and muscle contours; they don’t reshape bodies or identify faces.</p>
+    <h3>If the camera preview stops</h3><p>Tap <strong>Resume video</strong> if playback is paused. <strong>Show camera only</strong> displays the direct camera feed; the selected filter is still applied after capture. Tap <strong>Show live filters</strong> to return to the filtered preview. If neither view moves, try <strong>Restart camera</strong>. Open your published HTTPS address directly in Safari and allow camera access.</p>
+    <details class="camera-details"><summary>Camera details</summary><p>If you need help, copy these details along with your published app link. They contain playback status, not photos.</p><textarea id="cameraDetails" readonly aria-label="Camera diagnostic details" rows="8"></textarea><div><button id="refreshDetails" class="secondary">Refresh details</button><button id="copyDetails" class="secondary">Copy details</button></div></details>
+    <label class="setting">Save format<select id="formatSelect"><option value="image/png">PNG · lossless export</option><option value="image/jpeg">JPEG · maximum quality</option></select></label>
+    <label class="setting toggle-setting"><span>Mirror live selfies<small>Applies to the front live camera only.</small></span><input id="mirrorSetting" type="checkbox" checked></label>
+    <h3>Save to your camera roll</h3><p>Tap <strong>Save photo → Share / Save Image</strong>, then choose <strong>Save Image</strong> in the iPhone share sheet. If it is unavailable, open the photo and touch and hold it to save. Photos are not saved automatically.</p>
+    <h3>Keep it upright</h3><p>Enable <strong>Portrait Orientation Lock</strong> in iPhone Control Center. Safari cannot reliably lock the phone for us, so LeLuma pauses its controls when the phone is sideways.</p>
+    <h3>Offline, and all yours</h3><p>Open the app online once and wait for <strong>Offline ready</strong>. In Safari, use <strong>Share → Add to Home Screen</strong> (enable Open as Web App if shown). Open it from that icon once online. Camera, filters, and exports then work without internet while the app remains cached. iOS can clear website data; open online again if needed.</p><p>No accounts, uploads, analytics, or external fonts. Pictures stay on your device. The current photo is held in memory: save it before closing or starting a new photo. Smoothing uses skin-like colors and can also soften similarly colored objects.</p>
+    <button id="updateButton" class="secondary full-width">Check for app updates</button><a id="repairLink" class="text-button full-width" href="./repair.html">Repair app / refresh installed version</a><p class="version">LeLuma 1.3.0 · 75 looks + Original</p>
+  </div>
+</dialog>
+<dialog id="saveDialog" class="sheet">
+  <div class="sheet-heading"><div><span class="eyebrow">ONE TO KEEP</span><h2 id="saveHeading">Preparing your photo…</h2></div><button id="closeSave" class="icon-button" data-close="saveDialog" aria-label="Close save sheet"><svg><use href="#i-close"/></svg></button></div>
+  <div class="sheet-content"><div class="save-preview"><img id="savePreview" alt="Your finished photo" hidden><progress id="exportProgress" max="1" value="0"></progress></div><p id="exportDetails" class="export-details">Rendering every source pixel.</p><button id="shareButton" class="primary full-width" disabled><svg><use href="#i-download"/></svg>Share / Save Image</button><a id="downloadLink" class="secondary full-width" hidden download>Download photo</a><a id="openImageLink" class="text-button full-width" target="_blank" rel="noopener" hidden>Open photo to save manually ↗</a><p class="save-help">In the iPhone share sheet, select <strong>Save Image</strong>. Sharing does not save automatically.</p><button id="saveOriginalButton" class="text-button full-width">Keep an unfiltered original too</button></div>
+</dialog>
+<dialog id="newPhotoDialog" class="sheet small-sheet"><div class="sheet-content"><h2>Start a new photo?</h2><p>Save this photo first if you want to keep it. Starting over removes this unsaved edit.</p><button id="confirmNewPhoto" class="primary full-width">Start new photo</button><button data-close="newPhotoDialog" class="secondary full-width">Keep editing</button></div></dialog>
+<input id="fileInput" type="file" accept="image/*" hidden>
+<input id="nativeInput" type="file" accept="image/*" capture="user" hidden>
+<noscript>LeLuma needs JavaScript to run the live camera and filters.</noscript>
+<script defer src="./bundle.js"></script>
+</body>
+</html>
