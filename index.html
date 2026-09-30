@@ -10,8 +10,8 @@
   <meta name="description" content="A little light. A lot of you. 75 photo filters, live camera, and private, offline editing.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
   <title>LeLuma · Your light, your look</title>
 </head>
@@ -38,6 +38,7 @@
   <section class="viewfinder" id="viewfinder" aria-label="Camera preview">
     <div id="cameraSurface" class="camera-surface"><video id="video" autoplay muted playsinline webkit-playsinline disablepictureinpicture aria-label="Live camera"></video></div>
     <canvas id="preview" aria-label="Filtered photo preview" hidden></canvas>
+    <canvas id="gpuPreview" aria-label="Live filtered camera preview" hidden></canvas>
     <div class="frame-top"><span class="pill" id="sourceBadge">YOUR LIGHT, YOUR LOOK</span><span class="pill" id="resolutionBadge" hidden></span></div>
     <div id="grid" class="grid" hidden></div>
     <div class="welcome" id="welcome">
@@ -61,9 +62,9 @@
     <button id="compareButton" class="tool" aria-pressed="false"><svg><use href="#i-compare"/></svg><span>Original</span></button>
   </div>
   <section class="studio" aria-label="Photo editor">
-    <div class="studio-heading"><div class="tabs" role="tablist" aria-label="Editing tools"><button id="looksTab" role="tab" aria-selected="true" aria-controls="looksPanel">Looks <span>75</span></button><button id="adjustTab" role="tab" aria-selected="false" aria-controls="adjustPanel">Adjust</button></div><button id="favoriteButton" class="icon-button" aria-label="Favorite current filter" aria-pressed="false"><svg><use href="#i-star"/></svg></button></div>
+    <div class="studio-heading"><div class="tabs" role="tablist" aria-label="Editing tools"><button id="looksTab" role="tab" aria-selected="true" aria-controls="looksPanel">Looks <span>75</span></button><button id="adjustTab" role="tab" aria-selected="false" aria-controls="adjustPanel">Adjust</button></div><button id="favoriteButton" class="favorite-button" aria-label="Favorite current filter" aria-pressed="false"><svg aria-hidden="true"><use href="#i-star"/></svg><span id="favoriteLabel">Favorite</span></button></div>
     <div id="looksPanel" role="tabpanel" aria-labelledby="looksTab">
-      <div id="categories" class="categories" aria-label="Filter categories"></div>
+      <div class="category-bar" role="group" aria-label="Filter categories"><button id="favoritesCategory" class="category-favorites" aria-pressed="false">★ Favorites <span id="favoriteCount">0</span></button><div id="categories" class="categories" aria-label="More filter categories"></div></div>
       <div id="filterRail" class="filter-rail" aria-label="Choose a filter"></div>
       <div class="strength"><label for="strength">Intensity</label><input id="strength" type="range" min="0" max="100" value="100"><output id="strengthValue" for="strength">100</output></div>
     </div>
@@ -87,6 +88,8 @@
     <h3>Portrait or landscape</h3><p>Choose <strong>Portrait 3:4</strong> or <strong>Landscape 4:3</strong> to frame your photo. The preview and saved picture use the same center crop. You can change framing after capture. <strong>Full frame</strong> keeps the whole image. The app’s controls stay upright; landscape framing does not require rotating your phone.</p>
     <h3>Every pixel, thoughtfully kept</h3><p>Full frame exports retain the input dimensions. Portrait and Landscape crop the edges and keep the remaining source pixels without upscaling. PNG avoids extra lossy compression; JPEG at maximum quality makes smaller files. Filtered copies are standard color images, not RAW, HDR, Live Photos, or the original metadata. Keep your original for archival quality.</p>
     <h3>Looks that actually preview</h3><p>Tap a look to apply it at <strong>100% intensity</strong>, then adjust the slider. The <strong>Original</strong> toolbar button toggles before/after. A look’s name appears over the image; <strong>Look applied</strong> means its pixels have finished updating. Skin looks soften skin-like colors. Definition looks use local contrast and sharpening for features and muscle contours; they don’t reshape bodies or identify faces.</p>
+    <h3>Keep your favorites close</h3><p>Select a look and tap <strong>★ Favorite</strong>. Open the always-visible <strong>★ Favorites</strong> category to see your collection. Tap <strong>Favorited</strong> again to remove a look. Favorites and the open Favorites category are saved on this device between visits.</p>
+    <h3>Smoother live filters</h3><p>Live filters use hardware acceleration where available and follow incoming camera frames, targeting up to 30 frames per second. Preview detail adjusts automatically under load; your captured photo keeps its source dimensions. A compatibility preview is available if graphics acceleration fails, but may update more slowly. You can also use <strong>Show camera only</strong> and apply the chosen look after capture.</p>
     <h3>If the camera preview stops</h3><p>Tap <strong>Resume video</strong> if playback is paused. <strong>Show camera only</strong> displays the direct camera feed; the selected filter is still applied after capture. Tap <strong>Show live filters</strong> to return to the filtered preview. If neither view moves, try <strong>Restart camera</strong>. Open your published HTTPS address directly in Safari and allow camera access.</p>
     <details class="camera-details"><summary>Camera details</summary><p>If you need help, copy these details along with your published app link. They contain playback status, not photos.</p><textarea id="cameraDetails" readonly aria-label="Camera diagnostic details" rows="8"></textarea><div><button id="refreshDetails" class="secondary">Refresh details</button><button id="copyDetails" class="secondary">Copy details</button></div></details>
     <label class="setting">Save format<select id="formatSelect"><option value="image/png">PNG · lossless export</option><option value="image/jpeg">JPEG · maximum quality</option></select></label>
@@ -94,7 +97,7 @@
     <h3>Save to your camera roll</h3><p>Tap <strong>Save photo → Share / Save Image</strong>, then choose <strong>Save Image</strong> in the iPhone share sheet. If it is unavailable, open the photo and touch and hold it to save. Photos are not saved automatically.</p>
     <h3>Keep it upright</h3><p>Enable <strong>Portrait Orientation Lock</strong> in iPhone Control Center. Safari cannot reliably lock the phone for us, so LeLuma pauses its controls when the phone is sideways.</p>
     <h3>Offline, and all yours</h3><p>Open the app online once and wait for <strong>Offline ready</strong>. In Safari, use <strong>Share → Add to Home Screen</strong> (enable Open as Web App if shown). Open it from that icon once online. Camera, filters, and exports then work without internet while the app remains cached. iOS can clear website data; open online again if needed.</p><p>No accounts, uploads, analytics, or external fonts. Pictures stay on your device. The current photo is held in memory: save it before closing or starting a new photo. Smoothing uses skin-like colors and can also soften similarly colored objects.</p>
-    <button id="updateButton" class="secondary full-width">Check for app updates</button><a id="repairLink" class="text-button full-width" href="./repair.html">Repair app / refresh installed version</a><p class="version">LeLuma 1.3.0 · 75 looks + Original</p>
+    <button id="updateButton" class="secondary full-width">Check for app updates</button><a id="repairLink" class="text-button full-width" href="./repair.html">Repair app / refresh installed version</a><p class="version">LeLuma 1.4.0 · 75 looks + Original</p>
   </div>
 </dialog>
 <dialog id="saveDialog" class="sheet">

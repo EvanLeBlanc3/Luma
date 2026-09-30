@@ -1,6 +1,7 @@
 import {FILTERS,ADJUSTMENTS,BASE,parameters} from './filters.js';
 import {Renderer,CpuRenderer,exportPhoto,toBlob} from './renderer.js';
 import {cropRect} from './framing.js';
+import {THUMBNAILS} from './thumbnails.js';
 
 const $=id=>document.getElementById(id);
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -8,17 +9,49 @@ const size=source=>[source.videoWidth||source.naturalWidth||source.width,source.
 const pixels=(w,h)=>`${w.toLocaleString()} × ${h.toLocaleString()}`;
 let prefs={};try{prefs=JSON.parse(localStorage.getItem('leluma.preferences.v1')||localStorage.getItem('evcam.preferences.v1')||localStorage.getItem('luma.preferences.v1')||'{}')||{};}catch{}
 const state={filter:FILTERS.find(f=>f.id===prefs.filter)||FILTERS[1],strength:Number.isFinite(prefs.strength)?Math.max(0,Math.min(1,prefs.strength)):1,adjustments:{},favorites:new Set(Array.isArray(prefs.favorites)?prefs.favorites:[]),category:'Everyday',facing:'user',mode:'full',mirror:prefs.mirror!==false,format:prefs.format==='image/jpeg'?'image/jpeg':'image/png',timer:0,compare:false,review:false,demo:false,busy:false,stream:null,source:null,sourceFile:null,previewSource:null,sourceKind:'',cameraWanted:false,paused:false,exportFile:null,exportUrl:null};
-let renderer,demoImage,raf=0,lastFrame=0,toastTimeout,cameraRequest=0,timerToken=0,offlineReady=false,exportBusy=false,exportTask=0,wakeLock=null;
+let renderer,demoImage,raf=0,toastTimeout,cameraRequest=0,timerToken=0,offlineReady=false,exportBusy=false,exportTask=0,wakeLock=null;
 let cameraPending=false,activeCameraCancel=null,renderScheduled=false,renderRunning=false,renderAgain=false,previewRevision=0,previewError=null;
 let cameraOnly=false,cameraReady=false,mediaIssue='',mediaTime=null,mediaChangedAt=0,playAttempt=0,lastPaintAt=0;
+let liveRenderer=null,gpuFailed=false,videoFrameHandle=0,lastVideoTime=-1,lastHealthCheck=0;
+let previewEdge=720,scaledUpload=false,renderCost=0,lastQualityChange=0,fpsStarted=0,fpsFrames=0,liveFPS=0;
+const clock=()=>globalThis.performance?.now?.()??Date.now();
+function hidePreview(){$('preview').hidden=true;$('gpuPreview').hidden=true;}
+function previewsHidden(){return $('preview').hidden&&$('gpuPreview').hidden;}
+function showPreview(canvas){$('preview').hidden=canvas!==$('preview');$('gpuPreview').hidden=canvas!==$('gpuPreview');}
+function liveAllowed(){return cameraReady&&!cameraOnly&&!previewError&&!portraitBlocked()&&!document.querySelector('dialog[open]');}
+function queueVideoFrame(){
+  const video=$('video'),stream=state.stream;if(!stream||document.hidden||!video.requestVideoFrameCallback)return;
+  videoFrameHandle=video.requestVideoFrameCallback(()=>{
+    videoFrameHandle=0;if(state.stream!==stream||document.hidden)return;
+    checkCameraFrames();if(liveAllowed())safeRender(false,true);queueVideoFrame();
+  });
+}
+function stopVideoFrames(){if(videoFrameHandle)$('video').cancelVideoFrameCallback?.(videoFrameHandle);videoFrameHandle=0;}
+function recordLiveFrame(start,gpu){
+  const now=clock(),cost=now-start;renderCost=renderCost?renderCost*.9+cost*.1:cost;
+  if(!fpsStarted)fpsStarted=now;fpsFrames++;
+  if(now-fpsStarted>=1000){liveFPS=Math.round(fpsFrames*1000/(now-fpsStarted));fpsFrames=0;fpsStarted=now;}
+  // Change only preview resolution. Capture and export retain the camera source.
+  if(gpu&&renderCost>20&&now-lastQualityChange>2000&&previewEdge>360){previewEdge=Math.max(360,previewEdge-120);scaledUpload=true;lastQualityChange=now;renderCost=0;}
+}
 const cameraEvents=[];
 function cameraLog(message){cameraEvents.push(new Date().toISOString().slice(11,19)+' '+message);if(cameraEvents.length>15)cameraEvents.shift();}
 state.strength=1;
 state.framing=['original','portrait','landscape'].includes(prefs.framing)?prefs.framing:'original';
 const previewInput=document.createElement('canvas');
 const previewContext=previewInput.getContext('2d',{alpha:false});
-state.category=state.filter.group==='Original'?'Everyday':state.filter.group;
-function savePrefs(){try{localStorage.setItem('leluma.preferences.v1',JSON.stringify({filter:state.filter.id,strength:state.strength,favorites:[...state.favorites],mirror:state.mirror,format:state.format,framing:state.framing}));}catch{}}
+state.favorites=new Set([...state.favorites].filter(id=>FILTERS.some(filter=>filter.id===id)));
+state.category=prefs.showFavorites===true?'Favorites':state.filter.group==='Original'?'Everyday':state.filter.group;
+function savePrefs(){try{localStorage.setItem('leluma.preferences.v1',JSON.stringify({filter:state.filter.id,strength:state.strength,favorites:[...state.favorites],mirror:state.mirror,format:state.format,framing:state.framing,showFavorites:state.category==='Favorites'}));return true;}catch{return false;}}
+function syncFavorites(){
+  const saved=state.favorites.has(state.filter.id);
+  $('favoriteButton').setAttribute('aria-pressed',String(saved));
+  $('favoriteButton').setAttribute('aria-label',`${saved?'Remove':'Add'} ${state.filter.name} ${saved?'from':'to'} favorites`);
+  $('favoriteLabel').textContent=saved?'Favorited':'Favorite';
+  $('favoriteCount').textContent=String(state.favorites.size);
+  $('favoritesCategory').setAttribute('aria-pressed',String(state.category==='Favorites'));
+  $('favoritesCategory').setAttribute('aria-label',`Favorites, ${state.favorites.size} saved looks`);
+}
 function toast(message,delay=4500){clearTimeout(toastTimeout);$('toast').textContent=message;$('toast').hidden=false;toastTimeout=setTimeout(()=>$('toast').hidden=true,delay);}
 function showDialog(id){if(!$(id).open)$(id).showModal();}
 function portraitBlocked(){return matchMedia('(orientation: landscape) and (pointer: coarse)').matches;}
@@ -32,7 +65,7 @@ function layoutCamera(){
 }
 function cameraHint(){
   if(!state.stream||state.review)return;
-  if($('preview').hidden){$('frameFilterName').textContent='Camera';$('frameHint').textContent=cameraOnly?'Camera only · look applied after capture':previewError?'Camera only · retry live filters':cameraReady?'Camera only · preparing look…':'Starting camera…';}
+  if(previewsHidden()){$('frameFilterName').textContent='Camera';$('frameHint').textContent=cameraOnly?'Camera only · look applied after capture':previewError?'Camera only · retry live filters':cameraReady?'Camera only · preparing look…':'Starting camera…';}
 }
 function updateMediaControls(){
   $('liveControls').hidden=!state.stream||state.review;
@@ -45,56 +78,78 @@ function updateMediaControls(){
 }
 function failPreview(error){
   previewError=error;cameraLog('Filter preview: '+error.message);
-  if(state.stream)$('preview').hidden=true;
+  if(state.stream)hidePreview();
   $('previewError').hidden=false;
   $('previewErrorText').textContent=state.stream?'Showing camera only. Your look will apply after capture.':'The photo preview could not update.';
   $('frameHint').textContent='Preview interrupted';cameraHint();
 }
-function safeRender(changed=true){
+function safeRender(changed=true,immediate=false){
   if(changed){++previewRevision;previewError=null;$('previewError').hidden=true;$('frameFilterName').textContent=state.compare?'Original':state.filter.name;$('frameHint').textContent='Applying look…';}
   if(state.stream&&(cameraOnly||!cameraReady)){cameraHint();return;}
-  if(renderRunning){renderAgain=true;return;}
+  if(renderRunning){if(changed)renderAgain=true;return;}
   if(renderScheduled||document.hidden)return;
-  renderScheduled=true;requestAnimationFrame(async()=>{
+  renderScheduled=true;const run=async()=>{
     renderScheduled=false;renderRunning=true;const revision=previewRevision;
     try{await render();}catch(error){if(revision===previewRevision)failPreview(error);}
     finally{renderRunning=false;if(renderAgain&&!previewError){renderAgain=false;safeRender(false);}}
-  });
+  };if(immediate)void run();else requestAnimationFrame(run);
 }
 async function render(){
   if(document.hidden)return;
   if(!state.review&&!state.stream&&!state.demo)return;
   if(state.stream&&(cameraOnly||!cameraReady))return;
-  if(!renderer)renderer=new CpuRenderer($('preview'));
   const src=state.review?state.previewSource:state.stream?$('video'):demoImage;
   if(!src)return;
   const [sw,sh]=size(src);if(!sw||!sh)return;
   if(src===$('video')&&src.readyState<2)return;
-  const revision=previewRevision,stream=state.stream,filterName=state.compare?'Original':state.filter.name;
+  const revision=previewRevision,stream=state.stream,filterName=state.compare?'Original':state.filter.name,started=clock();
   const crop=state.review?cropRect(...size(state.source),state.framing):cropRect(sw,sh,state.framing);
-  const cropScaleX=state.review?sw/size(state.source)[0]:1,cropScaleY=state.review?sh/size(state.source)[1]:1;
-  const ratio=Math.min(1,(stream?400:480)/Math.max(crop.width,crop.height)),w=Math.max(1,Math.round(crop.width*ratio)),h=Math.max(1,Math.round(crop.height*ratio));
-  if(previewInput.width!==w||previewInput.height!==h){previewInput.width=w;previewInput.height=h;}
-  previewContext.drawImage(src,crop.x*cropScaleX,crop.y*cropScaleY,crop.width*cropScaleX,crop.height*cropScaleY,0,0,w,h);
   const valid=()=>revision===previewRevision&&stream===state.stream&&!previewError&&(!stream||(!cameraOnly&&cameraReady));
-  const committed=await renderer.render(previewInput,w,h,params(),{mirror:!state.review&&!!stream&&state.facing==='user'&&state.mirror,fullSize:[w,h],shouldCommit:valid});
-  if(committed&&valid()){lastPaintAt=Date.now();$('preview').hidden=false;$('frameFilterName').textContent=filterName;$('frameHint').textContent=state.compare?'Before · original colors':state.review?'Look applied':state.demo?'Sample · look applied':'Live · look applied';state.renderedRevision=revision;$('previewError').hidden=true;}
+  const mirror=!state.review&&!!stream&&state.facing==='user'&&state.mirror;
+  let committed=false,outputCanvas=$('preview'),usedGPU=false;
+  if(stream&&!gpuFailed){
+    try{
+      if(!liveRenderer)liveRenderer=new Renderer($('gpuPreview'),{preserve:true});
+      const ratio=Math.min(1,previewEdge/Math.max(crop.width,crop.height)),w=Math.max(1,Math.round(crop.width*ratio)),h=Math.max(1,Math.round(crop.height*ratio));
+      // Start with direct video upload. If that is expensive on this device,
+      // upload a smaller reusable surface; neither path reads pixels to the CPU.
+      if(scaledUpload){
+        if(previewInput.width!==w||previewInput.height!==h){previewInput.width=w;previewInput.height=h;}
+        previewContext.drawImage(src,crop.x,crop.y,crop.width,crop.height,0,0,w,h);
+        liveRenderer.render(previewInput,w,h,params(),{mirror,fullSize:[w,h]});
+      }else liveRenderer.render(src,w,h,params(),{mirror,fullSize:[crop.width,crop.height],cropUV:[crop.x/sw,crop.y/sh,crop.width/sw,crop.height/sh]});
+      committed=true;outputCanvas=$('gpuPreview');usedGPU=true;
+    }catch(error){gpuFailed=true;hidePreview();cameraLog('Using compatibility filters: '+error.message);}
+  }
+  if(!committed){
+    if(!renderer)renderer=new CpuRenderer($('preview'));
+    const cropScaleX=state.review?sw/size(state.source)[0]:1,cropScaleY=state.review?sh/size(state.source)[1]:1;
+    const ratio=Math.min(1,(stream?240:480)/Math.max(crop.width,crop.height)),w=Math.max(1,Math.round(crop.width*ratio)),h=Math.max(1,Math.round(crop.height*ratio));
+    if(previewInput.width!==w||previewInput.height!==h){previewInput.width=w;previewInput.height=h;}
+    previewContext.drawImage(src,crop.x*cropScaleX,crop.y*cropScaleY,crop.width*cropScaleX,crop.height*cropScaleY,0,0,w,h);
+    committed=await renderer.render(previewInput,w,h,params(),{mirror,fullSize:[w,h],shouldCommit:valid});
+  }
+  if(committed&&valid()){
+    lastPaintAt=Date.now();showPreview(outputCanvas);
+    const hint=state.compare?'Before · original colors':state.review?'Look applied':state.demo?'Sample · look applied':usedGPU?'Live · look applied':'Live · compatibility preview';
+    if($('frameFilterName').textContent!==filterName)$('frameFilterName').textContent=filterName;
+    if($('frameHint').textContent!==hint)$('frameHint').textContent=hint;
+    state.renderedRevision=revision;$('previewError').hidden=true;if(stream)recordLiveFrame(started,usedGPU);
+  }
 }
 function loop(now){
   if(!state.stream||document.hidden)return;
-  checkCameraFrames();
+  if(now-lastHealthCheck>250){checkCameraFrames();lastHealthCheck=now;}
   const renderingAllowed=!portraitBlocked()&&!document.querySelector('dialog[open]');
   if(!renderingAllowed)lastPaintAt=Date.now();
-  if(renderingAllowed&&!cameraOnly&&cameraReady&&!$('preview').hidden&&Date.now()-lastPaintAt>3000)failPreview(new Error('Live filters stopped updating.'));
-  if(now-lastFrame>150&&!previewError&&renderingAllowed){safeRender(false);lastFrame=now;}
+  if(renderingAllowed&&!cameraOnly&&cameraReady&&!previewsHidden()&&Date.now()-lastPaintAt>3000)failPreview(new Error('Live filters stopped updating.'));
+  if(!$('video').requestVideoFrameCallback&&$('video').currentTime!==lastVideoTime){lastVideoTime=$('video').currentTime;if(liveAllowed())safeRender(false,true);}
   raf=requestAnimationFrame(loop);
 }
 function sync(){
   $('strength').value=String(Math.round(state.strength*100));$('strengthValue').value=$('strength').value;
   $('lookDescription').textContent=state.filter.id==='original'&&Object.values(state.adjustments).some(Boolean)?'No preset. Your manual adjustments still apply.':state.filter.description;
-  $('favoriteButton').setAttribute('aria-pressed',String(state.favorites.has(state.filter.id)));
-  $('favoriteButton').disabled=state.filter.id==='original';
-  $('favoriteButton').setAttribute('aria-label',`${state.favorites.has(state.filter.id)?'Unfavorite':'Favorite'} ${state.filter.name}`);
+  syncFavorites();
   $('compareButton').setAttribute('aria-pressed',String(state.compare));
   $('liveMode').setAttribute('aria-pressed',String(state.mode==='live'));$('fullMode').setAttribute('aria-pressed',String(state.mode==='full'));
   $('captureMode').hidden=state.review;$('cameraActions').hidden=state.review;$('reviewActions').hidden=!state.review;
@@ -122,22 +177,23 @@ function sync(){
   document.querySelectorAll('.filter-item').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.id===state.filter.id)));
   layoutCamera();updateMediaControls();
 }
-function setCategory(category){state.category=category;renderCategories();renderFilters();}
+function setCategory(category){state.category=category;renderCategories();renderFilters();savePrefs();}
 function renderCategories(){
+  syncFavorites();
   $('categories').replaceChildren();
-  for(const name of ['Everyday','Selfie','Skin','Definition','Warm','Cool','Film','Editorial','Favorites']){
+  for(const name of ['Everyday','Selfie','Skin','Definition','Warm','Cool','Film','Editorial']){
     const button=document.createElement('button');button.textContent=name;button.setAttribute('aria-pressed',String(state.category===name));button.onclick=()=>setCategory(name);$('categories').append(button);
   }
 }
 function renderFilters(){
   const rail=$('filterRail');rail.replaceChildren();
   const filters=state.category==='Favorites'?FILTERS.filter(f=>state.favorites.has(f.id)):[FILTERS[0],...FILTERS.filter(f=>f.group===state.category)];
-  if(!filters.length){const p=document.createElement('p');p.className='empty-favorites';p.textContent='Your little collection starts here. Tap the star on any look to keep it close.';rail.append(p);return;}
+  if(!filters.length){const p=document.createElement('p');p.className='empty-favorites';p.textContent='No favorites yet. Choose a look from any category, then tap ★ Favorite above. Your saved looks will appear here.';rail.append(p);return;}
   for(const filter of filters){
-    const button=document.createElement('button');button.className='filter-item';button.dataset.id=filter.id;button.setAttribute('aria-label',`${filter.name}: ${filter.description}`);button.setAttribute('aria-pressed',String(state.filter.id===filter.id));
-    const img=new Image();img.src=`./thumbnails/${filter.id}.jpg`;img.alt='';img.width=60;img.height=70;img.loading='lazy';
+    const button=document.createElement('button');button.className='filter-item';button.dataset.id=filter.id;button.setAttribute('aria-label',`${filter.name}${state.favorites.has(filter.id)?', favorite':''}: ${filter.description}`);button.setAttribute('aria-pressed',String(state.filter.id===filter.id));
+    const img=new Image();img.src=THUMBNAILS[filter.id];img.alt='';img.width=60;img.height=70;img.loading='lazy';
     const label=document.createElement('span');label.textContent=filter.name;button.append(img,label);
-    if(state.favorites.has(filter.id)){const star=document.createElement('span');star.className='favorite-dot';star.textContent='★';button.append(star);}
+    if(state.favorites.has(filter.id)){const star=document.createElement('span');star.className='favorite-dot';star.textContent='★';star.setAttribute('aria-hidden','true');button.append(star);}
     button.onclick=()=>{state.filter=filter;state.strength=1;state.compare=false;if(!state.stream&&!state.review&&!cameraPending)state.demo=true;sync();safeRender();savePrefs();};rail.append(button);
   }
   rail.scrollLeft=0;
@@ -155,24 +211,24 @@ function setTab(tab){const looks=tab==='looks';$('looksTab').setAttribute('aria-
 
 async function requestWake(){try{if('wakeLock'in navigator){const lock=await navigator.wakeLock.request('screen');if(state.stream)wakeLock=lock;else lock.release().catch(()=>{});}}catch{}}
 function stopCamera(){
-  ++cameraRequest;++playAttempt;++previewRevision;activeCameraCancel?.();activeCameraCancel=null;cameraPending=false;cancelAnimationFrame(raf);
+  ++cameraRequest;++playAttempt;++previewRevision;activeCameraCancel?.();activeCameraCancel=null;cameraPending=false;cancelAnimationFrame(raf);stopVideoFrames();
   const old=state.stream;state.stream=null;old?.getTracks().forEach(t=>t.stop());$('video').srcObject=null;
-  cameraReady=false;mediaTime=null;mediaIssue='';$('preview').hidden=true;$('previewError').hidden=true;
+  cameraReady=false;mediaTime=null;mediaIssue='';hidePreview();$('previewError').hidden=true;
   wakeLock?.release().catch(()=>{});wakeLock=null;
 }
 function checkCameraFrames(){
   if(!state.stream)return;
   const video=$('video'),track=state.stream.getVideoTracks()[0],now=Date.now();
-  const wasReady=cameraReady;
+  const wasReady=cameraReady,oldIssue=mediaIssue;
   if(track?.muted){cameraReady=false;mediaIssue='Safari paused this camera. Re-enable it in Safari, or tap Restart camera.';}
   else if(video.paused){cameraReady=false;mediaIssue='Camera playback is paused. Tap Resume video.';}
   else if(video.readyState>=2&&video.videoWidth&&video.videoHeight){
     if(mediaTime!==video.currentTime){mediaTime=video.currentTime;mediaChangedAt=now;cameraReady=true;mediaIssue='';}
     else if(now-mediaChangedAt>4500){cameraReady=false;mediaIssue='No new camera frames. Tap Resume video or Restart camera.';}
   }else if(now-mediaChangedAt>4500){cameraReady=false;mediaIssue='Waiting for camera frames. Tap Resume video or Restart camera.';}
-  if(!cameraReady)$('preview').hidden=true;
+  if(!cameraReady)hidePreview();
   if(cameraReady&&!wasReady){cameraLog('Video frames ready');layoutCamera();safeRender();}
-  updateMediaControls();
+  if(wasReady!==cameraReady||oldIssue!==mediaIssue)updateMediaControls();
 }
 function playCamera(){
   if(!state.stream||document.hidden)return;
@@ -184,10 +240,10 @@ function playCamera(){
     const pending=video.play();
     Promise.resolve(pending).then(()=>{if(state.stream===stream&&attempt===playAttempt){cameraLog('Video play resolved');checkCameraFrames();}}).catch(error=>{
       if(state.stream!==stream||attempt!==playAttempt)return;
-      cameraReady=false;$('preview').hidden=true;mediaIssue='Tap Resume video to start playback, or Restart camera.';cameraLog('Video play: '+error.name);updateMediaControls();
+      cameraReady=false;hidePreview();mediaIssue='Tap Resume video to start playback, or Restart camera.';cameraLog('Video play: '+error.name);updateMediaControls();
     });
   }catch(error){mediaIssue='Tap Resume video to start playback, or Restart camera.';cameraLog('Video play: '+error.name);updateMediaControls();}
-  cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
+  lastVideoTime=-1;lastHealthCheck=0;cancelAnimationFrame(raf);stopVideoFrames();queueVideoFrame();raf=requestAnimationFrame(loop);
 }
 async function startCamera(){
   if(state.busy||cameraPending)return;
@@ -206,7 +262,7 @@ async function startCamera(){
       pending.then(result=>{if(canceled||request!==cameraRequest)result.getTracks().forEach(t=>t.stop());}).catch(()=>{});
       return Promise.race([pending,deadline]);
     }
-    try{stream=await acquire({facingMode:{ideal:state.facing},width:{ideal:1920},height:{ideal:1440},frameRate:{ideal:24,max:30}});}
+    try{stream=await acquire({facingMode:{ideal:state.facing},width:{ideal:1920},height:{ideal:1440},frameRate:{ideal:30,max:30}});}
     catch(error){if(!canceled&&['OverconstrainedError','NotReadableError','AbortError'].includes(error.name)){await sleep(250);if(canceled)throw canceledError;stream=await acquire({facingMode:{ideal:state.facing}});}else throw error;}
     if(canceled||request!==cameraRequest){stream.getTracks().forEach(t=>t.stop());return;}
     clearTimeout(timeout);activeCameraCancel=null;cameraPending=false;
@@ -214,7 +270,7 @@ async function startCamera(){
     video.setAttribute('playsinline','');video.setAttribute('webkit-playsinline','');video.srcObject=stream;
     const actual=stream.getVideoTracks()[0].getSettings?.().facingMode;if(actual==='user'||actual==='environment')state.facing=actual;
     if(document.hidden){stopCamera();state.paused=true;sync();return;}
-    state.paused=false;state.demo=false;state.review=false;previewError=null;sync();cameraLog('Stream attached');playCamera();requestWake();
+    state.paused=false;state.demo=false;state.review=false;previewError=null;previewEdge=720;scaledUpload=false;renderCost=0;fpsStarted=0;fpsFrames=0;liveFPS=0;sync();cameraLog('Stream attached');playCamera();requestWake();
     try{const lock=screen.orientation?.lock?.('portrait-primary');lock?.catch(()=>{});}catch{}
     const track=stream.getVideoTracks()[0];
     track.addEventListener('ended',()=>{if(state.stream===stream){cameraLog('Track ended');stopCamera();state.paused=true;sync();}});
@@ -308,7 +364,7 @@ async function setupOffline(){
 
 $('startButton').onclick=startCamera;$('resumeButton').onclick=startCamera;
 $('playCamera').onclick=playCamera;$('restartCamera').onclick=startCamera;
-$('previewMode').onclick=()=>{cameraOnly=!cameraOnly;++previewRevision;$('preview').hidden=true;$('previewError').hidden=true;previewError=null;updateMediaControls();if(!cameraOnly)safeRender();};
+$('previewMode').onclick=()=>{cameraOnly=!cameraOnly;++previewRevision;hidePreview();$('previewError').hidden=true;previewError=null;updateMediaControls();if(!cameraOnly)safeRender();};
 $('retryPreview').onclick=()=>{cameraOnly=false;renderer?.dispose();renderer=null;renderAgain=false;updateMediaControls();safeRender();};
 for(const mode of ['original','portrait','landscape'])$('frame-'+mode).onclick=()=>{state.framing=mode;sync();safeRender();savePrefs();};
 $('cancelCameraButton').onclick=$('cancelResumeButton').onclick=()=>{stopCamera();state.cameraWanted=false;state.paused=false;state.demo=false;sync();toast('Camera opening canceled. You can retry or use Full photo.');};
@@ -317,7 +373,8 @@ $('flipButton').onclick=async()=>{state.facing=state.facing==='user'?'environmen
 $('gridButton').onclick=()=>{const show=$('grid').hidden;$('grid').hidden=!show;$('gridButton').setAttribute('aria-pressed',String(show));};
 $('timerButton').onclick=()=>{state.timer=state.timer===0?3:state.timer===3?10:0;sync();};
 $('compareButton').onclick=()=>{state.compare=!state.compare;sync();safeRender();};
-$('favoriteButton').onclick=()=>{if(state.filter.id==='original')return;if(state.favorites.has(state.filter.id))state.favorites.delete(state.filter.id);else state.favorites.add(state.filter.id);savePrefs();sync();renderFilters();};
+$('favoritesCategory').onclick=()=>setCategory('Favorites');
+$('favoriteButton').onclick=()=>{const removing=state.favorites.has(state.filter.id);if(removing)state.favorites.delete(state.filter.id);else state.favorites.add(state.filter.id);const saved=savePrefs();syncFavorites();renderFilters();toast(saved?`${state.filter.name} ${removing?'removed from':'saved to'} Favorites.`:'Favorites updated for this visit. Your browser could not save them for next time.');};
 $('strength').oninput=()=>{state.strength=+$('strength').value/100;state.compare=false;sync();safeRender();savePrefs();};
 $('looksTab').onclick=()=>setTab('looks');$('adjustTab').onclick=()=>setTab('adjust');
 for(const id of ['looksTab','adjustTab'])$(id).onkeydown=e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();const other=id==='looksTab'?'adjustTab':'looksTab';$(other).click();$(other).focus();}};
@@ -332,12 +389,14 @@ $('confirmNewPhoto').onclick=()=>{$('newPhotoDialog').close();clearPhoto();state
 $('saveButton').onclick=()=>prepareExport();$('shareButton').onclick=sharePhoto;$('saveOriginalButton').onclick=()=>prepareExport(true);
 function cameraDetails(){
   const video=$('video'),track=state.stream?.getVideoTracks()[0];
-  return ['LeLuma 1.3.0',navigator.userAgent||'Browser unknown',
+  return ['LeLuma 1.4.0',navigator.userAgent||'Browser unknown',
     'Secure page: '+window.isSecureContext,'App installed: '+!!navigator.standalone,
     'Permission request pending: '+cameraPending,'Stream attached: '+!!state.stream,
     'Track: '+(track?`${track.readyState}; enabled=${track.enabled}; muted=${track.muted}`:'none'),
     `Video: ${video.videoWidth} × ${video.videoHeight}; readyState=${video.readyState}; paused=${video.paused}; time=${video.currentTime}`,
-    'Camera frames ready: '+cameraReady,'Display: '+($('preview').hidden?'native video':'filtered canvas'),
+    'Camera frames ready: '+cameraReady,'Display: '+(previewsHidden()?'native video':'filtered canvas'),
+    'Live renderer: '+(gpuFailed?'compatibility CPU':liveRenderer?'WebGL':'not started'),
+    'Recent filtered frames/sec: '+liveFPS,'GPU preview edge: '+previewEdge,'Scaled texture upload: '+scaledUpload,
     'Selected look: '+state.filter.id,'Preview error: '+(previewError?.message||'none'),
     'Playback notice: '+(mediaIssue||'none'),...cameraEvents].join('\n');
 }
@@ -366,7 +425,9 @@ window.addEventListener('beforeunload',e=>{if(state.review){e.preventDefault();e
 $('video').addEventListener('resize',()=>{if(state.stream)sync();});
 $('video').addEventListener('pause',()=>{if(state.stream&&!state.review){cameraLog('Video paused');checkCameraFrames();}});
 for(const event of ['loadeddata','playing'])$('video').addEventListener(event,()=>{if(state.stream){cameraLog(event);checkCameraFrames();}});
-$('video').addEventListener('error',()=>{if(state.stream){cameraReady=false;$('preview').hidden=true;mediaIssue='Video could not start. Tap Restart camera.';cameraLog('Video element error');updateMediaControls();}});
+$('video').addEventListener('error',()=>{if(state.stream){cameraReady=false;hidePreview();mediaIssue='Video could not start. Tap Restart camera.';cameraLog('Video element error');updateMediaControls();}});
+$('gpuPreview').addEventListener('webglcontextlost',event=>{event.preventDefault();gpuFailed=true;liveRenderer=null;++previewRevision;hidePreview();cameraLog('Graphics interrupted; using compatibility preview');if(state.stream)safeRender();});
+$('gpuPreview').addEventListener('webglcontextrestored',()=>{gpuFailed=false;liveRenderer=null;++previewRevision;hidePreview();cameraLog('Graphics restored');if(state.stream)safeRender();});
 
 async function init(){
   renderCategories();renderFilters();renderAdjustments();sync();setupOffline();

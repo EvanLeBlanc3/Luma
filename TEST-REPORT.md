@@ -1,59 +1,48 @@
-# LeLuma 1.3.0 verification
+# LeLuma 1.4.0 verification
 
 September 30, 2026.
 
-## Scope and limits
+## What changed
 
-This release addresses camera-display and playback failure paths found in the source. The exact cause on the user's phone remains unconfirmed: no published app URL, device diagnostic report, connected iPhone, or browser engine was available. The checks below run the shipping JavaScript with DOM/media adapters and real Skia canvas pixels. They do not reproduce Safari's permissions, compositor, or physical camera.
+The preceding live preview performed CPU pixel processing at a 400-pixel maximum edge and was capped by a 150ms timer, allowing at most about 6.7 updates per second. This release uses a separate WebGL preview and follows actual video-frame callbacks when available. A timestamp-aware animation-frame fallback avoids drawing duplicate camera frames in older browsers. Busy processing drops incoming work rather than building a stale-frame queue.
 
-## Camera changes
+The GPU path starts with a direct video upload. When submission is expensive, it uses a smaller reusable upload surface and reduces preview detail from a maximum 720-pixel edge toward 360. Neither GPU path uses getImageData or a worker round trip. Capture and full-photo export still use original source dimensions. A 240-pixel CPU compatibility preview remains available when graphics acceleration fails; it may refresh more slowly.
 
-The preceding release placed an opaque canvas over the native video even before a filter frame was ready. Its video pause listener also stopped and detached the stream immediately. LeLuma keeps the native video exposed until a current filtered frame commits, retains the stream across playback pauses, and separates media acquisition from play() completion.
+A clearly labeled Favorite/Favorited button and a fixed Favorites shortcut make saved looks easy to find. Saved choices, count, removals, and the active Favorites category persist in local preferences. The upload package contains 27 individual files and no nested asset folders; thumbnail bytes are embedded in the app.
 
-Native playback has a direct-tap Resume button. Missing or stalled frames, muted tracks, and renderer failures expose recovery controls. Camera-only display is explicitly labeled; the selected filter still applies to the captured photo. Capture is disabled while the video has no usable current frame. Backgrounding releases the camera, and returning offers Resume camera.
+## Evidence
 
-The classic worker and local fallback still apply all filter operations. Live previews use a 400-pixel maximum working edge; capture and export use the source dimensions. Full-size export code and filter recipes are unchanged from 1.2.
-
-## Checks
-
-| Check | Evidence |
+| Check | Result |
 | --- | --- |
-| Playback promise never resolves | The native surface remains exposed, the permission-pending state clears, and Flip and Import remain usable. |
-| Playback rejects | The stream is retained. Resume invokes play() synchronously from the click handler and restores the filtered canvas when frames arrive. |
-| Video pauses | An injected pause event does not stop the track. Resume recovers using the same stream. |
-| Frames stop advancing | A controlled clock and constant video time trigger the stalled-frame message, hide the stale canvas, and block Live shot. New video timestamps recover the preview. |
-| Track mute/unmute | Mute exposes recovery controls and prevents capture. Unmute restarts playback and rendering. |
-| Filter rendering fails | An injected renderer exception reveals native video with the Camera-only label. Retry restores the selected look. |
-| Camera-only mode | Switching mode hides the canvas. New filter selections keep native video visible. Switching back renders the selected look. |
-| Native framing | Portrait/Landscape crop dimensions are applied to the native video container; filtered output retains the corresponding aspect ratio. |
-| Background and return | Simulated visibility changes stop tracks in the background and allow reacquisition from Resume camera. |
-| Permission cancellation | A stream returned after Cancel is stopped and cannot attach. |
-| Permission timeout | Advancing the acquisition deadline clears pending state and restores the Open button. |
-| Camera-only capture | The source retains the camera's 600 × 800 test dimensions. The selected Noir filter is applied to review pixels. |
-| Every filter button | All 75 presets plus Original produce 76 distinct pixel outputs on the actual output canvas using a simulated, advancing camera source. Selecting a preset restores 100% intensity. |
-| Filter consistency | Noir produces equal RGB channels. Portrait/Landscape controls change composition, rapid selections commit the latest revision, and captured-photo review remains editable. |
-| Every exported filter | All 76 choices export distinct valid PNG images at the test input dimensions. |
-| Full-size export | A neutral 1,253 × 1,109 PNG decodes at the same dimensions and matches source pixels exactly. |
-| Exact crop export | An 831 × 1,108 portrait crop and a 1,252 × 939 landscape crop match the corresponding original source pixels. Mirroring also passes. |
-| Worker delivery | The actual classic worker script completes 88 export jobs through a worker-thread adapter with no lost responses. |
-| Offline update | All 91 precached entries resolve without a network request in a service-worker simulation. Legacy EvCam/Luma caches in this app's scope are removed; unrelated caches remain. |
-| Package wiring | HTML IDs, code-to-DOM references, local assets, manifest icons, bundle syntax, and ZIP contents are checked. |
+| Frame scheduling | In an instrumented media/API simulation, 90 incoming video frames produced 90 GPU draws with no 150ms cap, no duplicate health-check draws, and one pending video callback. This is not a device FPS benchmark. |
+| Direct upload | Simulated WebGL calls received the video element directly for every initial draw; no intermediate CPU pixel extraction was invoked. |
+| Adaptive preview | Injected slow GPU submission reduced preview dimensions and enabled scaled upload without changing camera source dimensions. |
+| Preview suspension | Opening Help or choosing Camera only suspended filter draws; closing/toggling resumed them. Stopping the camera canceled pending frame callbacks. |
+| GPU interruption | Simulated graphics loss retained the stream and switched to the CPU preview. Restoration resumed the GPU canvas. |
+| Actual shaders | The shipping vertex/fragment shader compiled and linked in headless EGL/OpenGL ES. All 75 looks plus Original produced 76 distinct pixel outputs. |
+| Crop and mirror | Actual shader output for direct source crop coordinates, including selfie mirroring, matched expected source pixels within 1 channel level. Original orientation and monochrome checks passed. |
+| Full-size GPU effects | Tiled and whole-image rendering of a 1,253 × 1,109 image, including smoothing, definition, and grain, matched with maximum observed channel difference 0. |
+| Filter buttons | All 75 presets plus Original produced 76 distinct real 2D canvas outputs through the compatibility path. Zero-intensity recovery, crop controls, render-error recovery, rapid selections, and photo-review changes passed. |
+| Favorites | Add/remove, button state, count, saved-only category, preferences after a simulated reload, and storage-failure feedback passed using the shipping app bundle. |
+| Camera recovery | Unresolved/rejected playback, direct Resume gesture, pause without destroying the track, stalled frames, mute/unmute, background release, canceled late permissions, and acquisition timeout all passed in the media adapter. |
+| Camera-only capture | Capturing in native-view mode retained 600 × 800 source dimensions and applied the chosen Noir effect in review. |
+| Export | All 76 choices produced distinct valid PNGs. Full-frame neutral export matched source pixels exactly. Portrait/landscape crops and mirroring passed. The actual bundled worker completed 88 export jobs without lost responses. |
+| Embedded thumbnails | All 76 embedded JPEGs decode to exactly the same bytes as their original thumbnail files. |
+| Offline package | All 15 precached entries resolve offline in a service-worker simulation. Embedded thumbnails are included in bundle.js. Old app caches are removed only within this app scope; unrelated caches remain. |
+| Wiring | HTML IDs, code-to-DOM references, root-level manifest icons, local assets, JavaScript syntax, and archive structure are checked. |
 
-## Real-iPhone verification still needed
+The media/API adapters execute the shipping app bundle. The shader checks use actual graphics shader execution, and export checks use real canvas pixels and PNG decoding. These do not reproduce Safari's compositor, hardware camera, permissions, thermal behavior, or native share sheet.
 
-1. Upload all package contents, wait for deployment, and confirm **Help → LeLuma 1.3.0** in Safari. Refresh the installed app cache if the old version remains.
-2. Tap Open camera and allow access. Verify a moving front-camera feed, then switch to the rear camera.
-3. Try **Show camera only**, then **Show live filters**. Film → Noir at 100% should turn the filtered preview black and white.
-4. Background and reopen the app, then tap Resume camera. Rotate back upright if the orientation guard is visible.
-5. Take Live shot and Full photo images; verify the chosen crop, effects, pixel dimensions, and Save Image behavior in Photos.
-6. Check the Home Screen installation and offline camera launch after all assets are cached.
-7. If preview still fails, copy **Help → Camera details** and provide the published app URL. The details contain playback state and events, not image data.
+## Remaining iPhone verification
 
-Safari layout, actual camera permissions and frames, front/back switching, phone performance, HEIC decoding, iOS share-sheet saving, and installed-PWA behavior remain unverified on hardware. A dark scene alone is not treated as a failed camera; the app monitors playback state and frame advancement rather than assuming dark pixels indicate an error.
+This environment has no connected iPhone or browser engine. Physical frame rate, visual smoothness, touch layout, actual camera permission behavior, front/back switching, HEIC decoding, Photos saving, and installed-PWA behavior are not certified. The app targets up to 30 fps when the device and camera permit; the automated callback count must not be interpreted as measured iPhone performance.
+
+After publishing all 27 files, refresh the installed app and confirm **LeLuma 1.4.0** in Help. Try a moving subject with Film → Noir, a Skin look, and a Definition look. Compare with Camera only. Help → Camera details reports the renderer, recent filtered FPS, scaled-upload mode, and recent playback events. Send those details with the published app link if performance remains poor. Details contain no image data.
+
+Verify Favorites after closing and reopening the same browser/app installation. Check Live shot, Full photo, portrait/landscape crops, saving to Photos, and offline launch after caching. PNG avoids additional lossy compression, but filtered exports do not preserve every native RAW/HDR/metadata feature; retain the original.
 
 ## Implementation references
 
-- Apple's video guidance recommends a play button for one-way WebRTC experiences: https://developer.apple.com/documentation/webkit/delivering-video-content-for-safari
-- WebKit documents media-track mute/unmute events when capture is paused or another tab takes capture access: https://webkit.org/blog/7763/a-closer-look-into-webrtc/
-
-Skin softening uses skin-like colors and may affect similarly colored objects. Definition enhances existing contrast and texture; it does not reshape anatomy. Full frame preserves source dimensions; Portrait/Landscape deliberately crop. Maximum export size depends on device memory, and filtered copies do not retain all native RAW/HDR/metadata features.
+- Video-frame scheduling: https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/requestVideoFrameCallback
+- WebKit media capture and mute/unmute behavior: https://webkit.org/blog/7763/a-closer-look-into-webrtc/
+- GitHub browser upload limits and file selection: https://docs.github.com/en/repositories/working-with-files/managing-files/adding-a-file-to-a-repository

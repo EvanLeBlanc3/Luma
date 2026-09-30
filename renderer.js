@@ -7,13 +7,14 @@ const fragment=`precision highp float;
 varying vec2 vUV;
 uniform sampler2D uImage;
 uniform vec2 uTexSize,uFullSize,uOrigin;
+uniform vec4 uCrop;
 uniform float uMirror,uRadius,uDefinitionRadius;
 uniform float exposure,contrast,saturation,warmth,tint,fade,grain,vignette,smooth,sharp,clarity,shadows,highlights,mono,sepia;
 float lum(vec3 c){return dot(c,vec3(.2126,.7152,.0722));}
 float noise(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
-vec3 tap(vec2 uv,vec2 d){return texture2D(uImage,clamp(uv+d/uTexSize,vec2(0.),vec2(1.))).rgb;}
+vec3 tap(vec2 uv,vec2 d){return texture2D(uImage,clamp(uv+d/uTexSize,uCrop.xy,uCrop.xy+uCrop.zw)).rgb;}
 void main(){
-  vec2 uv=vec2(mix(vUV.x,1.-vUV.x,uMirror),vUV.y);
+  vec2 uv=uCrop.xy+vec2(mix(vUV.x,1.-vUV.x,uMirror),vUV.y)*uCrop.zw;
   vec3 original=texture2D(uImage,uv).rgb;
   vec3 c=original;
   if(smooth>.001){
@@ -46,7 +47,7 @@ void main(){
   vec3 brown=vec3(dot(c,vec3(.393,.769,.189)),dot(c,vec3(.349,.686,.168)),dot(c,vec3(.272,.534,.131)));
   c=mix(c,brown,sepia);c=mix(c,vec3(lum(c)),mono);
   c=c*(1.-fade)+vec3(fade*.58);
-  vec2 fullUV=(uOrigin+vUV*uTexSize)/uFullSize;
+  vec2 fullUV=(uOrigin+vUV*uTexSize*uCrop.zw)/uFullSize;
   float edge=smoothstep(.26,.72,length(fullUV-.5));c*=1.-edge*vignette*.65;
   c+=(noise(floor(fullUV*uFullSize))-.5)*grain*.11;
   gl_FragColor=vec4(clamp(c,0.,1.),1.);
@@ -68,16 +69,17 @@ export class Renderer {
     this.texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,this.texture);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-    this.uniforms={};for(const name of [...Object.keys(BASE),'uImage','uTexSize','uFullSize','uOrigin','uMirror','uRadius','uDefinitionRadius'])this.uniforms[name]=gl.getUniformLocation(this.program,name);
+    this.uniforms={};for(const name of [...Object.keys(BASE),'uImage','uTexSize','uFullSize','uOrigin','uCrop','uMirror','uRadius','uDefinitionRadius'])this.uniforms[name]=gl.getUniformLocation(this.program,name);
   }
-  render(source,w,h,params,{mirror=false,origin=[0,0],fullSize=[w,h],radius,definitionRadius,upload=true}={}){
+  render(source,w,h,params,{mirror=false,origin=[0,0],fullSize=[w,h],cropUV=[0,0,1,1],radius,definitionRadius,upload=true}={}){
     const gl=this.gl;if(gl.isContextLost())throw new Error('The graphics context was interrupted. Reopen LeLuma to continue.');
     if(this.canvas.width!==w||this.canvas.height!==h){this.canvas.width=w;this.canvas.height=h;}
     gl.viewport(0,0,w,h);gl.useProgram(this.program);gl.bindTexture(gl.TEXTURE_2D,this.texture);
-    if(upload)gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);
+    if(upload){gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);if(!this.checkedUpload){if(gl.getError()!==gl.NO_ERROR)throw new Error('The camera texture could not be uploaded.');this.checkedUpload=true;}}
     gl.uniform1i(this.uniforms.uImage,0);
     const sw=source.videoWidth||source.naturalWidth||source.width,sh=source.videoHeight||source.naturalHeight||source.height;
     gl.uniform2f(this.uniforms.uTexSize,sw,sh);gl.uniform2f(this.uniforms.uFullSize,...fullSize);gl.uniform2f(this.uniforms.uOrigin,...origin);
+    gl.uniform4f(this.uniforms.uCrop,...cropUV);
     gl.uniform1f(this.uniforms.uMirror,mirror?1:0);gl.uniform1f(this.uniforms.uRadius,radius??Math.max(1,Math.min(...fullSize)/420));
     gl.uniform1f(this.uniforms.uDefinitionRadius,definitionRadius??Math.max(2,Math.min(...fullSize)/60));
     for(const key of Object.keys(BASE))gl.uniform1f(this.uniforms[key],params[key]??BASE[key]);

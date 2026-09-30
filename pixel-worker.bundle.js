@@ -1,4 +1,4 @@
-/* LeLuma 1.3.0 filter worker */
+/* LeLuma 1.4.0 filter worker */
 // Portable filter path when WebGL is unavailable. Rows yield to keep taps responsive.
 async function processPixels(data,w,h,p,{origin=[0,0],fullSize=[w,h],radius=Math.max(1,Math.min(...fullSize)/420),definitionRadius=Math.max(2,Math.min(...fullSize)/60)}={}){
   const out=new Uint8ClampedArray(data.length),clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
